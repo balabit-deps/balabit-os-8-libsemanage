@@ -1,0 +1,74 @@
+#!/usr/bin/make -f
+#export DH_VERBOSE=1
+
+include /usr/share/dpkg/architecture.mk
+ifeq ($(origin CC),default)
+CC := $(DEB_HOST_GNU_TYPE)-gcc
+endif
+export CC
+
+DOPACKAGES = $(shell dh_listpackages)
+
+DH_ADDONS=
+ifneq ($(filter python3-semanage,$(DOPACKAGES)),)
+PY3VERSIONS = $(shell py3versions -rv)
+DH_ADDONS += --with=python3
+endif
+ifneq ($(filter ruby-semanage,$(DOPACKAGES)),)
+RUBY_VERSIONS := $(shell dh_ruby --print-supported)
+DH_ADDONS += --with=ruby
+endif
+
+# The build system doesn't use CPPFLAGS, pass them to CFLAGS to enable the
+# missing (hardening) flags.
+export DEB_CFLAGS_MAINT_APPEND = $(shell dpkg-buildflags --get CPPFLAGS)
+
+%:
+	dh $@ $(DH_ADDONS)
+
+override_dh_auto_build:
+	$(MAKE) all
+
+ifneq ($(filter python3-semanage,$(DOPACKAGES)),)
+	set -e; for version in $(PY3VERSIONS); do        \
+	  $(MAKE) pywrap PYTHON=python$$version PYLIBS=; \
+	done;
+endif
+ifneq ($(filter ruby-semanage,$(DOPACKAGES)),)
+	set -e; for version in $(RUBY_VERSIONS); do      \
+	  $(MAKE) -C src rubywrap RUBY=$$version; \
+	done;
+endif
+
+override_dh_auto_install:
+	$(MAKE) install DESTDIR="${CURDIR}/debian/tmp" \
+	  LIBDIR="/usr/lib/${DEB_HOST_MULTIARCH}" \
+	  SHLIBDIR="/usr/lib/${DEB_HOST_MULTIARCH}" \
+	  SELINUXEXECDIR="/usr/lib/selinux"
+
+ifneq ($(filter python3-semanage,$(DOPACKAGES)),)
+	set -e; for version in $(PY3VERSIONS); do        \
+	  $(MAKE) install-pywrap PYTHON=python$$version DESTDIR="${CURDIR}/debian/tmp"; \
+	done;
+endif
+ifneq ($(filter ruby-semanage,$(DOPACKAGES)),)
+	set -e; for version in $(RUBY_VERSIONS); do      \
+	  $(MAKE) -C src install-rubywrap RUBY=$$version DESTDIR="${CURDIR}/debian/tmp"; \
+	done;
+endif
+
+override_dh_auto_clean:
+ifneq ($(filter python3-semanage,$(DOPACKAGES)),)
+	set -e; for version in $(PY3VERSIONS); do         \
+	  $(MAKE) clean PYTHON=python$$version;  \
+	done;
+endif
+
+override_dh_missing:
+	dh_missing --list-missing
+
+override_dh_fixperms:
+	dh_fixperms
+ifneq ($(filter python3-semanage,$(DOPACKAGES)),)
+	chmod -x ${CURDIR}/debian/python3-semanage/usr/lib/python*/*-packages/semanage.py
+endif
